@@ -58,22 +58,25 @@ npm install -g @jackwener/opencli@latest
 
 浏览器命令需要：
 1. **Chrome** 浏览器正在运行，且**已登录目标网站**（如 bilibili.com、zhihu.com、xiaohongshu.com）
-2. 安装 **[Playwright MCP Bridge](https://chromewebstore.google.com/detail/playwright-mcp-bridge/mmlmfjhmonkocbjadbfplnigmagldckm)** 扩展
-3. 在 MCP 配置中设置 `PLAYWRIGHT_MCP_EXTENSION_TOKEN`（从扩展设置页获取）：
 
-```json
-{
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest", "--extension"],
-      "env": {
-        "PLAYWRIGHT_MCP_EXTENSION_TOKEN": "<your-token>"
-      }
-    }
-  }
-}
-```
+#### 方式 A：Chrome 144+ 自动发现（推荐）
+
+无需安装扩展，只需开启 Chrome 内置远程调试：
+
+1. 在 Chrome 中打开 `chrome://inspect#remote-debugging`
+2. 勾选 **"允许对此浏览器实例进行远程调试"**
+3. 完成 — opencli 会通过 `DevToolsActivePort` 自动发现运行中的 Chrome
+
+也可通过 `OPENCLI_CDP_ENDPOINT` 环境变量手动指定 CDP endpoint。
+
+#### 方式 B：Playwright MCP Bridge 扩展（旧版）
+
+适用于旧版 Chrome 或自动发现不可用的情况：
+
+1. 安装 **[Playwright MCP Bridge](https://chromewebstore.google.com/detail/playwright-mcp-bridge/mmlmfjhmonkocbjadbfplnigmagldckm)** 扩展
+2. 配置 `PLAYWRIGHT_MCP_EXTENSION_TOKEN`（从扩展设置页获取）
+
+> 如果未检测到开启远程调试的 Chrome，opencli 会自动回退到扩展模式。
 
 公共 API 命令（`hackernews`、`github search`、`v2ex`）无需浏览器。
 

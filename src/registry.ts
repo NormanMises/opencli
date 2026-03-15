@@ -37,6 +37,8 @@ export interface CliCommand {
   /** Internal: lazy-loaded TS module support */
   _lazy?: boolean;
   _modulePath?: string;
+  /** Force extension bridge mode (bypass CDP), for anti-bot sites */
+  forceExtension?: boolean;
 }
 
 export interface CliOptions {
@@ -51,6 +53,8 @@ export interface CliOptions {
   func?: (page: IPage | null, kwargs: Record<string, any>, debug?: boolean) => Promise<any>;
   pipeline?: any[];
   timeoutSeconds?: number;
+  /** Force extension bridge mode (bypass CDP), for anti-bot sites */
+  forceExtension?: boolean;
 }
 
 const _registry = new Map<string, CliCommand>();
@@ -68,6 +72,7 @@ export function cli(opts: CliOptions): CliCommand {
     func: opts.func,
     pipeline: opts.pipeline,
     timeoutSeconds: opts.timeoutSeconds,
+    forceExtension: opts.forceExtension,
   };
 
   const key = fullName(cmd);

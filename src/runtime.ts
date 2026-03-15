@@ -27,10 +27,11 @@ export async function runWithTimeout<T>(
 export async function browserSession<T>(
   BrowserFactory: new () => any,
   fn: (page: IPage) => Promise<T>,
+  opts?: { forceExtension?: boolean },
 ): Promise<T> {
   const mcp = new BrowserFactory();
   try {
-    const page = await mcp.connect({ timeout: DEFAULT_BROWSER_CONNECT_TIMEOUT });
+    const page = await mcp.connect({ timeout: DEFAULT_BROWSER_CONNECT_TIMEOUT, forceExtension: opts?.forceExtension });
     return await fn(page);
   } finally {
     await mcp.close().catch(() => {});

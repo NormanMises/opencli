@@ -34,8 +34,8 @@ npm update -g @jackwener/opencli
 
 Browser commands require:
 1. Chrome browser running **(logged into target sites)**
-2. [Playwright MCP Bridge](https://chromewebstore.google.com/detail/playwright-mcp-bridge/mmlmfjhmonkocbjadbfplnigmagldckm) extension
-3. Configure `PLAYWRIGHT_MCP_EXTENSION_TOKEN` (from extension settings) in your MCP config
+2. **Chrome 144+** (recommended): Open `chrome://inspect#remote-debugging` → enable remote debugging. opencli auto-discovers via `DevToolsActivePort`
+3. **Fallback**: [Playwright MCP Bridge](https://chromewebstore.google.com/detail/playwright-mcp-bridge/mmlmfjhmonkocbjadbfplnigmagldckm) extension (auto-used when CDP not available)
 
 > **Note**: You must be logged into the target website in Chrome before running commands. Tabs opened during command execution are auto-closed afterwards.
 
@@ -332,6 +332,8 @@ ${{ index + 1 }}
 | `OPENCLI_BROWSER_COMMAND_TIMEOUT` | 45 | Command execution timeout (sec) |
 | `OPENCLI_BROWSER_EXPLORE_TIMEOUT` | 120 | Explore timeout (sec) |
 | `OPENCLI_EXTENSION_LOCK_TIMEOUT` | 120 | Extension lock timeout (sec) |
+| `OPENCLI_CDP_ENDPOINT` | — | Manual CDP WebSocket endpoint (overrides auto-discovery) |
+| `OPENCLI_FORCE_EXTENSION` | — | Set to `1` to skip CDP and force extension mode |
 | `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | — | Auto-approve extension connection |
 
 ## Troubleshooting
@@ -339,7 +341,7 @@ ${{ index + 1 }}
 | Issue | Solution |
 |-------|----------|
 | `npx not found` | Install Node.js: `brew install node` |
-| `Timed out connecting to browser` | 1) Chrome must be open 2) Install MCP Bridge extension 3) Click to approve |
+| `Timed out connecting to browser` | 1) Chrome must be open 2) Enable remote debugging at `chrome://inspect#remote-debugging` or install MCP Bridge extension |
 | `Extension lock timed out` | Another opencli command is running; browser commands run serially |
 | `Target page context` error | Add `navigate:` step before `evaluate:` in YAML |
 | Empty table data | Check if evaluate returns JSON string (MCP parsing) or data path is wrong |

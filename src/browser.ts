@@ -4,6 +4,7 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import * as net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -20,7 +21,19 @@ import { formatSnapshot } from './snapshotFormatter.js';
  *
  * Priority: OPENCLI_CDP_ENDPOINT env > DevToolsActivePort auto-discovery > --extension fallback
  */
-function discoverChromeEndpoint(): string | null {
+
+/** Quick TCP port probe to verify Chrome is actually listening */
+function isPortReachable(port: number, host = '127.0.0.1', timeoutMs = 800): Promise<boolean> {
+  return new Promise(resolve => {
+    const sock = net.createConnection({ port, host });
+    sock.setTimeout(timeoutMs);
+    sock.on('connect', () => { sock.destroy(); resolve(true); });
+    sock.on('error', () => resolve(false));
+    sock.on('timeout', () => { sock.destroy(); resolve(false); });
+  });
+}
+
+async function discoverChromeEndpoint(): Promise<string | null> {
   const candidates: string[] = [];
 
   // User-specified Chrome data dir takes highest priority
@@ -50,7 +63,11 @@ function discoverChromeEndpoint(): string | null {
         const port = parseInt(lines[0], 10);
         const browserPath = lines[1]; // e.g. /devtools/browser/<GUID>
         if (port > 0 && browserPath.startsWith('/devtools/browser/')) {
-          return `ws://127.0.0.1:${port}${browserPath}`;
+          const endpoint = `ws://127.0.0.1:${port}${browserPath}`;
+          // Verify the port is actually reachable (Chrome may have closed, leaving a stale file)
+          if (await isPortReachable(port)) {
+            return endpoint;
+          }
         }
       }
     } catch {}
@@ -287,32 +304,38 @@ export class PlaywrightMCP {
 
   private _page: Page | null = null;
 
-  async connect(opts: { timeout?: number } = {}): Promise<Page> {
+  async connect(opts: { timeout?: number; forceExtension?: boolean } = {}): Promise<Page> {
     await this._acquireLock();
     const timeout = opts.timeout ?? CONNECT_TIMEOUT;
     const mcpPath = findMcpServerPath();
     if (!mcpPath) throw new Error('Playwright MCP server not found. Install: npm install -D @playwright/mcp');
 
+    // Chrome 144+ auto-discovery via DevToolsActivePort file.
+    // Falls back to --extension mode if no running Chrome is detected.
+    // Some anti-bot sites (e.g. BOSS Zhipin) detect CDP — use forceExtension to bypass.
+    const forceExt = opts.forceExtension || process.env.OPENCLI_FORCE_EXTENSION === '1';
+    const cdpEndpoint = forceExt ? null : (process.env.OPENCLI_CDP_ENDPOINT ?? await discoverChromeEndpoint());
+
     return new Promise<Page>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Timed out connecting to browser (${timeout}s)`)), timeout * 1000);
 
-      // Chrome 144+ auto-discovery via DevToolsActivePort file.
-      // Falls back to --extension mode if no running Chrome is detected.
-      const cdpEndpoint = process.env.OPENCLI_CDP_ENDPOINT ?? discoverChromeEndpoint();
       const mcpArgs: string[] = [mcpPath];
       if (cdpEndpoint) {
         mcpArgs.push('--cdp-endpoint', cdpEndpoint);
       } else {
         mcpArgs.push('--extension');
       }
-    if (process.env.OPENCLI_BROWSER_EXECUTABLE_PATH) {
-      mcpArgs.push('--executablePath', process.env.OPENCLI_BROWSER_EXECUTABLE_PATH);
-    }
+      if (process.env.OPENCLI_VERBOSE) {
+        console.error(`[opencli] CDP mode: ${cdpEndpoint ? `auto-discovered ${cdpEndpoint}` : 'fallback to --extension'}`);
+      }
+      if (process.env.OPENCLI_BROWSER_EXECUTABLE_PATH) {
+        mcpArgs.push('--executablePath', process.env.OPENCLI_BROWSER_EXECUTABLE_PATH);
+      }
 
-    this._proc = spawn('node', mcpArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
-    });
+      this._proc = spawn('node', mcpArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+      });
 
       // Increase max listeners to avoid warnings
       this._proc.setMaxListeners(20);

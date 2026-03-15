@@ -57,22 +57,25 @@ npm install -g @jackwener/opencli@latest
 
 Browser commands need:
 1. **Chrome** running **and logged into the target site** (e.g. bilibili.com, zhihu.com, xiaohongshu.com)
-2. **[Playwright MCP Bridge](https://chromewebstore.google.com/detail/playwright-mcp-bridge/mmlmfjhmonkocbjadbfplnigmagldckm)** extension installed
-3. Configure `PLAYWRIGHT_MCP_EXTENSION_TOKEN` (from the extension settings page) in your MCP config:
 
-```json
-{
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest", "--extension"],
-      "env": {
-        "PLAYWRIGHT_MCP_EXTENSION_TOKEN": "<your-token>"
-      }
-    }
-  }
-}
-```
+#### Option A: Chrome 144+ Auto-Discovery (Recommended)
+
+No extensions needed. Just enable Chrome's built-in remote debugging:
+
+1. Open `chrome://inspect#remote-debugging` in Chrome
+2. Check **"Allow remote debugging for this browser instance"**
+3. That's it — opencli will auto-detect the running Chrome via `DevToolsActivePort`
+
+You can also manually specify a CDP endpoint via `OPENCLI_CDP_ENDPOINT` env var.
+
+#### Option B: Playwright MCP Bridge Extension (Legacy)
+
+For older Chrome versions or if auto-discovery doesn't work:
+
+1. Install **[Playwright MCP Bridge](https://chromewebstore.google.com/detail/playwright-mcp-bridge/mmlmfjhmonkocbjadbfplnigmagldckm)** extension
+2. Configure `PLAYWRIGHT_MCP_EXTENSION_TOKEN` (from the extension settings page)
+
+> opencli will automatically fall back to extension mode if no running Chrome with remote debugging is detected.
 
 Public API commands (`hackernews`, `github search`, `v2ex`) need no browser at all.
 

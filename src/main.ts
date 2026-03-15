@@ -99,9 +99,10 @@ for (const [, cmd] of registry) {
       else if (arg.default != null) kwargs[arg.name] = arg.default;
     }
     try {
+      if (actionOpts.verbose) process.env.OPENCLI_VERBOSE = '1';
       let result: any;
       if (cmd.browser) {
-        result = await browserSession(PlaywrightMCP, async (page) => runWithTimeout(executeCommand(cmd, page, kwargs, actionOpts.verbose), { timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT, label: fullName(cmd) }));
+        result = await browserSession(PlaywrightMCP, async (page) => runWithTimeout(executeCommand(cmd, page, kwargs, actionOpts.verbose), { timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT, label: fullName(cmd) }), { forceExtension: cmd.forceExtension });
       } else { result = await executeCommand(cmd, null, kwargs, actionOpts.verbose); }
       if (actionOpts.verbose && (!result || (Array.isArray(result) && result.length === 0))) {
         console.error(chalk.yellow(`[Verbose] Warning: Command returned an empty result. If the website structural API changed or requires authentication, check the network or update the adapter.`));
