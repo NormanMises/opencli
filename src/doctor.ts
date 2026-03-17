@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import chalk from 'chalk';
@@ -266,8 +266,11 @@ function readConfigStatus(filePath: string): McpConfigStatus {
  * Discover the auth token stored by the Playwright MCP Bridge extension
  * by scanning Chrome's LevelDB localStorage files directly.
  *
- * Uses `strings` + `grep` for fast binary scanning on macOS/Linux,
- * with a pure-Node fallback on Windows.
+ * Reads LevelDB .ldb/.log files as raw binary and searches for the
+ * extension ID near base64url token values. This works reliably across
+ * platforms because LevelDB's internal encoding can split ASCII strings
+ * like "auth-token" and the extension ID across byte boundaries, making
+ * text-based tools like `strings` + `grep` unreliable.
  */
 export function discoverExtensionToken(): string | null {
   const home = os.homedir();
@@ -296,7 +299,6 @@ export function discoverExtensionToken(): string | null {
   }
 
   const profiles = ['Default', 'Profile 1', 'Profile 2', 'Profile 3'];
-  // Token is 43 chars of base64url (from 32 random bytes)
   const tokenRe = /([A-Za-z0-9_-]{40,50})/;
 
   for (const base of bases) {
@@ -304,14 +306,6 @@ export function discoverExtensionToken(): string | null {
       const dir = path.join(base, profile, 'Local Storage', 'leveldb');
       if (!fileExists(dir)) continue;
 
-      // Fast path: use strings + grep to find candidate files and extract token
-      if (platform !== 'win32') {
-        const token = extractTokenViaStrings(dir, tokenRe);
-        if (token) return token;
-        continue;
-      }
-
-      // Slow path (Windows): read binary files directly
       const token = extractTokenViaBinaryRead(dir, tokenRe);
       if (token) return token;
     }
@@ -320,39 +314,20 @@ export function discoverExtensionToken(): string | null {
   return null;
 }
 
-function extractTokenViaStrings(dir: string, tokenRe: RegExp): string | null {
-  try {
-    // Single shell pipeline: for each LevelDB file, extract strings, find lines
-    // after the extension ID, and filter for base64url token pattern.
-    //
-    // LevelDB `strings` output for the extension's auth-token entry:
-    //   auth-token                                    ← key name
-    //   4,mmlmfjhmonkocbjadbfplnigmagldckm.7          ← LevelDB internal key
-    //   hqI86ncsD1QpcVcj-k9CyzTF-ieCQd_4KreZ_wy1WHA  ← token value
-    //
-    // We get the line immediately after any EXTENSION_ID mention and check
-    // if it looks like a base64url token (40-50 chars, [A-Za-z0-9_-]).
-    const shellDir = dir.replace(/'/g, "'\\''");
-    const cmd = `for f in '${shellDir}'/*.ldb '${shellDir}'/*.log; do ` +
-      `[ -f "$f" ] && strings "$f" 2>/dev/null | ` +
-      `grep -A1 '${PLAYWRIGHT_EXTENSION_ID}' | ` +
-      `grep -v '${PLAYWRIGHT_EXTENSION_ID}' | ` +
-      `grep -E '^[A-Za-z0-9_-]{40,50}$' | head -1; ` +
-      `done 2>/dev/null`;
-    const result = execSync(cmd, { encoding: 'utf-8', timeout: 10000 }).trim();
-
-    // Take the first non-empty line
-    for (const line of result.split('\n')) {
-      const token = line.trim();
-      if (token && validateBase64urlToken(token)) return token;
-    }
-  } catch {}
-  return null;
-}
-
 function extractTokenViaBinaryRead(dir: string, tokenRe: RegExp): string | null {
+  // LevelDB fragments strings across byte boundaries, so we can't search
+  // for the full extension ID or "auth-token" as contiguous ASCII. Instead,
+  // search for a short prefix of the extension ID that reliably appears as
+  // contiguous bytes, then scan a window around each match for a base64url
+  // token value.
+  //
+  // Observed LevelDB layout near the auth-token entry:
+  //   ... auth-t<binary> ... 4,mmlmfjh<binary>Pocbjadbfplnigmagldckm.7 ...
+  //   <binary> hqI86ncsD1QpcVcj-k9CyzTF-ieCQd_4KreZ_wy1WHA <binary> ...
+  //
+  // The extension ID prefix "mmlmfjh" appears ~44 bytes before the token.
   const extIdBuf = Buffer.from(PLAYWRIGHT_EXTENSION_ID);
-  const keyBuf = Buffer.from('auth-token');
+  const extIdPrefix = Buffer.from(PLAYWRIGHT_EXTENSION_ID.slice(0, 7)); // "mmlmfjh"
 
   let files: string[];
   try {
@@ -361,7 +336,7 @@ function extractTokenViaBinaryRead(dir: string, tokenRe: RegExp): string | null 
       .map(f => path.join(dir, f));
   } catch { return null; }
 
-  // Sort by mtime descending
+  // Sort by mtime descending so we find the freshest token first
   files.sort((a, b) => {
     try { return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs; } catch { return 0; }
   });
@@ -370,14 +345,30 @@ function extractTokenViaBinaryRead(dir: string, tokenRe: RegExp): string | null 
     let data: Buffer;
     try { data = fs.readFileSync(file); } catch { continue; }
 
-    // Quick check: does file contain both the extension ID and auth-token key?
-    const extPos = data.indexOf(extIdBuf);
-    if (extPos === -1) continue;
-    const keyPos = data.indexOf(keyBuf, Math.max(0, extPos - 500));
-    if (keyPos === -1) continue;
+    // Quick check: file must contain at least the prefix
+    if (data.indexOf(extIdPrefix) === -1) continue;
 
-    // Scan for token value after auth-token key
+    // Strategy 1: scan after each occurrence of the extension ID prefix
+    // for base64url tokens within a 500-byte window
     let idx = 0;
+    while (true) {
+      const pos = data.indexOf(extIdPrefix, idx);
+      if (pos === -1) break;
+
+      const scanStart = pos;
+      const scanEnd = Math.min(data.length, pos + 500);
+      const window = data.subarray(scanStart, scanEnd).toString('latin1');
+      const m = window.match(tokenRe);
+      if (m && validateBase64urlToken(m[1])) {
+        // Make sure this isn't another extension ID that happens to match
+        if (m[1] !== PLAYWRIGHT_EXTENSION_ID) return m[1];
+      }
+      idx = pos + 1;
+    }
+
+    // Strategy 2 (fallback): original approach using full extension ID + auth-token key
+    const keyBuf = Buffer.from('auth-token');
+    idx = 0;
     while (true) {
       const kp = data.indexOf(keyBuf, idx);
       if (kp === -1) break;
