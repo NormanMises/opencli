@@ -1,0 +1,48 @@
+/**
+ * opencli browser protocol — shared types between daemon, extension, and CLI.
+ *
+ * Only 4 actions. Everything else is just JS code sent via 'exec'.
+ */
+
+export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies';
+
+export interface Command {
+  /** Unique request ID */
+  id: string;
+  /** Action type */
+  action: Action;
+  /** Target tab ID (omit for active tab) */
+  tabId?: number;
+  /** JS code to evaluate in page context (exec action) */
+  code?: string;
+  /** URL to navigate to (navigate action) */
+  url?: string;
+  /** Sub-operation for tabs: list, new, close, select */
+  op?: 'list' | 'new' | 'close' | 'select';
+  /** Tab index for tabs select/close */
+  index?: number;
+  /** Cookie domain filter */
+  domain?: string;
+}
+
+export interface Result {
+  /** Matching request ID */
+  id: string;
+  /** Whether the command succeeded */
+  ok: boolean;
+  /** Result data on success */
+  data?: unknown;
+  /** Error message on failure */
+  error?: string;
+}
+
+/** Default daemon port */
+export const DAEMON_PORT = 19825;
+export const DAEMON_HOST = 'localhost';
+export const DAEMON_WS_URL = `ws://${DAEMON_HOST}:${DAEMON_PORT}/ext`;
+export const DAEMON_HTTP_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}`;
+
+/** Reconnect delay for extension WebSocket (ms) */
+export const WS_RECONNECT_DELAY = 3000;
+/** Idle timeout before daemon auto-exits (ms) */
+export const DAEMON_IDLE_TIMEOUT = 5 * 60 * 1000;
