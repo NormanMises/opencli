@@ -11,9 +11,14 @@ export const readCommand = cli({
   func: async (page) => {
     const historyText = await page.evaluate(`
       (function() {
+        // Precise Codex selector for chat messages
+        const turns = Array.from(document.querySelectorAll('[data-content-search-turn-key]'));
+        if (turns.length > 0) {
+            return turns.map(t => t.innerText || t.textContent).join('\\n\\n---\\n\\n');
+        }
+        
         // Fallback robust scraping heuristic for chat history panes
-        // We look for large scrolling areas or generic message lists
-        const threadContainer = document.querySelector('[role="log"], [data-testid="conversation"], main, .thread-container, .messages-list');
+        const threadContainer = document.querySelector('[role="log"], [data-testid="conversation"], .thread-container, .messages-list, main');
         
         if (threadContainer) {
           return threadContainer.innerText || threadContainer.textContent;
