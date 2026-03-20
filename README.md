@@ -145,6 +145,7 @@ Run `opencli list` for the live registry.
 | **smzdm** | `search` | Browser |
 | **weibo** | `hot` | Browser |
 | **yahoo-finance** | `quote` | Browser |
+| **sinafinance** | `news` | 🌐 Public |
 
 ### Desktop App Adapters
 

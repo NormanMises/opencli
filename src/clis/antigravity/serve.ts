@@ -97,7 +97,7 @@ async function getConversationText(page: IPage): Promise<string> {
   return String(text ?? '');
 }
 
-async function sendMessage(page: IPage, message: string): Promise<void> {
+async function sendMessage(page: IPage, message: string, bridge?: CDPBridge): Promise<void> {
   await page.evaluate(`
     (async () => {
       const container = document.getElementById('antigravity.agentSidePanelInputBox');
@@ -110,7 +110,28 @@ async function sendMessage(page: IPage, message: string): Promise<void> {
     })()
   `);
   await sleep(500);
-  await page.pressKey('Enter');
+
+  // Use CDP-level key event (native) instead of JS KeyboardEvent (synthetic).
+  // Lexical/React ignores synthetic KeyboardEvents but responds to native ones.
+  if (bridge) {
+    await bridge.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+    await sleep(50);
+    await bridge.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+  } else {
+    await page.pressKey('Enter');
+  }
 }
 
 async function waitForReply(
@@ -196,6 +217,7 @@ function extractLastReply(text: string): string {
 async function handleMessages(
   body: AnthropicRequest,
   page: IPage,
+  bridge?: CDPBridge,
 ): Promise<AnthropicResponse> {
   // Extract the last user message
   const userMessages = body.messages.filter(m => m.role === 'user');
@@ -214,7 +236,7 @@ async function handleMessages(
 
   // Send the message
   console.error(`[serve] Sending: "${userText.slice(0, 80)}${userText.length > 80 ? '...' : ''}"`);
-  await sendMessage(page, userText);
+  await sendMessage(page, userText, bridge);
 
   // Poll for reply
   console.error('[serve] Waiting for reply...');
@@ -372,7 +394,7 @@ export async function startServe(opts: { port?: number } = {}): Promise<void> {
 
           // Lazy connect on first request
           const activePage = await ensureConnected();
-          const response = await handleMessages(body, activePage);
+          const response = await handleMessages(body, activePage, cdp ?? undefined);
           jsonResponse(res, 200, response);
         } finally {
           requestInFlight = false;

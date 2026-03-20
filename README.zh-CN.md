@@ -146,6 +146,7 @@ npm install -g @jackwener/opencli@latest
 | **smzdm** | `search` | 浏览器 |
 | **weibo** | `hot` | 浏览器 |
 | **yahoo-finance** | `quote` | 浏览器 |
+| **sinafinance** | `news` | 🌐 公开 |
 
 ### 桌面应用适配器
 
