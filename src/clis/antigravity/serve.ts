@@ -84,6 +84,82 @@ function sleep(ms: number): Promise<void> {
 // ─── DOM helpers ─────────────────────────────────────────────────────
 
 /**
+ * Click the 'New Conversation' button to reset context.
+ */
+async function startNewConversation(page: IPage): Promise<void> {
+  await page.evaluate(`
+    (() => {
+      const btn = document.querySelector('[data-tooltip-id="new-conversation-tooltip"]');
+      if (btn) btn.click();
+    })()
+  `);
+  await sleep(1000); // Give UI time to clear
+}
+
+/**
+ * Switch the active model in Antigravity UI.
+ */
+async function switchModel(page: IPage, anthropicModelId: string): Promise<void> {
+  // Map standard Anthropic model IDs to Antigravity UI names
+  let targetName = 'claude 3.5 sonnet'; // Default fallback
+  const id = anthropicModelId.toLowerCase();
+  
+  if (id.includes('3-7-sonnet') || id.includes('3.7-sonnet')) {
+    targetName = 'claude 3.7 sonnet';
+  } else if (id.includes('3-5-sonnet') || id.includes('3.5-sonnet')) {
+    targetName = 'claude 3.5 sonnet';
+  } else if (id.includes('3-5-haiku') || id.includes('3.5-haiku')) {
+    targetName = 'claude 3.5 haiku';
+  } else if (id.includes('opus')) {
+    targetName = 'claude 3 opus';
+  }
+
+  try {
+    await page.evaluate(`
+      async () => {
+        const targetModelName = ${JSON.stringify(targetName)};
+        const trigger = document.querySelector('div[aria-haspopup="dialog"] > div[tabindex="0"]');
+        if (!trigger) return; // Silent fail if UI changed
+        
+        // Open dropdown only if not already selected
+        if (trigger.innerText.toLowerCase().includes(targetModelName)) return;
+        
+        trigger.click();
+        await new Promise(r => setTimeout(r, 200));
+        
+        const spans = Array.from(document.querySelectorAll('[role="dialog"] span'));
+        const target = spans.find(s => s.innerText.toLowerCase().includes(targetModelName));
+        if (target) {
+          const optionNode = target.closest('.cursor-pointer') || target;
+          optionNode.click();
+        } else {
+          // Close if not found
+          trigger.click(); 
+        }
+      }
+    `);
+    await sleep(500); // Wait for switch
+  } catch (err) {
+    console.error(`[serve] Warning: Could not switch to model ${targetName}:`, err);
+  }
+}
+
+/**
+ * Check if the Antigravity UI is currently generating a response
+ * by looking for Stop/Cancel buttons or loading indicators.
+ */
+async function isGenerating(page: IPage): Promise<boolean> {
+  const result = await page.evaluate(`
+    (() => {
+      // Look for a cancel/stop button in the UI
+      const cancelBtn = document.querySelector('button[aria-label*="cancel" i], button[aria-label*="stop" i], button[title*="cancel" i], button[title*="stop" i]');
+      return !!cancelBtn;
+    })()
+  `);
+  return Boolean(result);
+}
+
+/**
  * Walk from the scroll container and find the deepest element that
  * has multiple non-empty children (our message container).
  */
@@ -223,79 +299,55 @@ async function sendMessage(page: IPage, message: string, bridge?: CDPBridge): Pr
 async function waitForReply(
   page: IPage,
   beforeText: string,
-  opts: { timeout?: number; pollInterval?: number; stableThreshold?: number } = {},
-): Promise<string> {
+  opts: { timeout?: number; pollInterval?: number } = {},
+): Promise<void> {
   const timeout = opts.timeout ?? 120_000;     // 2 minutes max
   const pollInterval = opts.pollInterval ?? 500; // 500ms polling
-  const stableThreshold = opts.stableThreshold ?? 6; // 6 × 500ms = 3s stable
 
-  const beforeLen = beforeText.length;
   const deadline = Date.now() + timeout;
+
+  // Wait a bit to ensure the UI transitions to "generating" state after we hit Enter
+  await sleep(1000);
+
+  let hasStartedGenerating = false;
   let lastText = beforeText;
   let stableCount = 0;
-  let hasChanged = false;
-
-  // Wait a bit for the model to start generating
-  await sleep(2000);
+  const stableThreshold = 4; // 4 * 500ms = 2s of stability fallback
 
   while (Date.now() < deadline) {
-    const current = await getConversationText(page);
+    const generating = await isGenerating(page);
+    const currentText = await getConversationText(page);
+    const textChanged = currentText !== beforeText && currentText.length > 0;
 
-    // Detect ANY change from the pre-send state
-    if (current !== beforeText && current.length > 0) {
-      hasChanged = true;
-    }
-
-    if (hasChanged) {
-      if (current === lastText) {
-        stableCount++;
-        if (stableCount >= stableThreshold) {
-          // Text has been stable for N polls — reply is complete
-          // Extract only the new content (if text grew) or the full tail
-          if (current.length > beforeLen) {
-            return current.slice(beforeLen).trim();
+    if (generating) {
+      hasStartedGenerating = true;
+      stableCount = 0; // Reset stability while generating
+    } else {
+      if (hasStartedGenerating) {
+        // It actively generated and now it stopped -> DONE
+        // Provide a small buffer to let React render the final message fully
+        await sleep(500);
+        return;
+      }
+      
+      // Fallback: If it never showed "Generating/Cancel", but text changed and is stable
+      if (textChanged) {
+        if (currentText === lastText) {
+          stableCount++;
+          if (stableCount >= stableThreshold) {
+            return; // Text has been stable for 2 seconds -> DONE
           }
-          // DOM re-rendered: try to extract the last block of text
-          return extractLastReply(current);
+        } else {
+          stableCount = 0;
+          lastText = currentText;
         }
-      } else {
-        stableCount = 0;
-        lastText = current;
       }
     }
 
     await sleep(pollInterval);
   }
 
-  // Timeout — return whatever we have
-  const finalText = await getConversationText(page);
-  if (finalText !== beforeText) {
-    if (finalText.length > beforeLen) {
-      return finalText.slice(beforeLen).trim();
-    }
-    return extractLastReply(finalText);
-  }
   throw new Error('Timeout waiting for Antigravity reply');
-}
-
-/**
- * Extract the last assistant reply from conversation text.
- * Used as fallback when the DOM re-renders and simple length-diff doesn't work.
- */
-function extractLastReply(text: string): string {
-  // Try to find the last chunk after common markers
-  const lines = text.split('\n');
-  // Take the last non-empty substantial block (at least 2 chars)
-  const result: string[] = [];
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (line.length > 1) {
-      result.unshift(line);
-    } else if (result.length > 0) {
-      break; // Hit a gap, stop collecting
-    }
-  }
-  return result.join('\n') || text.slice(-2000);
 }
 
 // ─── Request Handlers ────────────────────────────────────────────────
@@ -315,6 +367,17 @@ async function handleMessages(
 
   if (!userText.trim()) {
     throw new Error('Empty user message');
+  }
+
+  // Optimization 1: New conversation if this is the first message in the session
+  if (body.messages.length === 1) {
+    console.error(`[serve] New session detected (1 message). Starting new conversation in UI.`);
+    await startNewConversation(page);
+  }
+
+  // Optimization 3: Switch model if requested
+  if (body.model) {
+    await switchModel(page, body.model);
   }
 
   // Get conversation state before sending
