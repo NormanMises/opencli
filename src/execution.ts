@@ -81,38 +81,41 @@ async function runCommand(
   kwargs: CommandArgs,
   debug: boolean,
 ): Promise<unknown> {
-  // Lazy-load TS module on first execution (manifest fast-path)
-  const internal = cmd as InternalCliCommand;
-  if (internal._lazy && internal._modulePath) {
-    const modulePath = internal._modulePath;
-    if (!_loadedModules.has(modulePath)) {
-      try {
-        await import(pathToFileURL(modulePath).href);
-        _loadedModules.add(modulePath);
-      } catch (err) {
-        throw new AdapterLoadError(
-          `Failed to load adapter module ${modulePath}: ${getErrorMessage(err)}`,
-          'Check that the adapter file exists and has no syntax errors.',
-        );
-      }
-    }
-    // After loading, the module's cli() call will have updated the registry.
-    const updated = getRegistry().get(fullName(cmd));
-    if (updated?.func) {
-      if (!page && updated.browser !== false) {
-        throw new CommandExecutionError(`Command ${fullName(cmd)} requires a browser session but none was provided`);
-      }
-      return updated.func(page as IPage, kwargs, debug);
-    }
-    if (updated?.pipeline) return executePipeline(page, updated.pipeline, { args: kwargs, debug });
-  }
+  const resolved = await resolveCommand(cmd);
 
-  if (cmd.func) return cmd.func(page as IPage, kwargs, debug);
-  if (cmd.pipeline) return executePipeline(page, cmd.pipeline, { args: kwargs, debug });
+  if (resolved.func) {
+    if (!page && shouldUseBrowserSession(resolved)) {
+      throw new CommandExecutionError(`Command ${fullName(resolved)} requires a browser session but none was provided`);
+    }
+    return resolved.func(page as IPage, kwargs, debug);
+  }
+  if (resolved.pipeline) return executePipeline(page, resolved.pipeline, { args: kwargs, debug });
   throw new CommandExecutionError(
-    `Command ${fullName(cmd)} has no func or pipeline`,
+    `Command ${fullName(resolved)} has no func or pipeline`,
     'This is likely a bug in the adapter definition. Please report this issue.',
   );
+}
+
+async function resolveCommand(cmd: CliCommand): Promise<CliCommand> {
+  // Lazy-load TS module on first execution (manifest fast-path)
+  const internal = cmd as InternalCliCommand;
+  if (!internal._lazy || !internal._modulePath) return cmd;
+
+  const modulePath = internal._modulePath;
+  if (!_loadedModules.has(modulePath)) {
+    try {
+      await import(pathToFileURL(modulePath).href);
+      _loadedModules.add(modulePath);
+    } catch (err) {
+      throw new AdapterLoadError(
+        `Failed to load adapter module ${modulePath}: ${getErrorMessage(err)}`,
+        'Check that the adapter file exists and has no syntax errors.',
+      );
+    }
+  }
+
+  // After loading, the module's cli() call should update the registry.
+  return getRegistry().get(fullName(cmd)) ?? cmd;
 }
 
 /**
@@ -155,17 +158,19 @@ export async function executeCommand(
   if (shouldUseBrowserSession(cmd)) {
     const BrowserFactory = getBrowserFactory();
     return browserSession(BrowserFactory, async (page) => {
+      const resolved = await resolveCommand(cmd);
+
       // Pre-navigate to target domain for cookie/header context if needed.
       // Each adapter controls this via `navigateBefore` (see CliCommand docs).
-      const preNavUrl = resolvePreNav(cmd);
+      const preNavUrl = resolvePreNav(resolved);
       if (preNavUrl) {
         try { await page.goto(preNavUrl); await page.wait(2); } catch (err) {
           if (debug) console.error(`[pre-nav] Failed to navigate to ${preNavUrl}: ${err instanceof Error ? err.message : err}`);
         }
       }
-      return runWithTimeout(runCommand(cmd, page, kwargs, debug), {
-        timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT,
-        label: fullName(cmd),
+      return runWithTimeout(runCommand(resolved, page, kwargs, debug), {
+        timeout: resolved.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT,
+        label: fullName(resolved),
       });
     }, { workspace: `site:${cmd.site}` });
   }

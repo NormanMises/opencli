@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseTsArgsBlock, scanTs, shouldReplaceManifestEntry } from './build-manifest.js';
 
 describe('parseTsArgsBlock', () => {
@@ -128,5 +129,52 @@ describe('manifest helper rules', () => {
     fs.writeFileSync(file, `export function helper() { return 'noop'; }`);
 
     expect(scanTs(file, 'demo')).toBeNull();
+  });
+
+  it('extracts timeoutSeconds from TS adapters into manifest timeout', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencli-manifest-'));
+    tempDirs.push(dir);
+    const file = path.join(dir, 'slow.ts');
+    const registryImport = pathToFileURL(path.join(process.cwd(), 'src', 'registry.ts')).href;
+    fs.writeFileSync(file, `
+import { cli, Strategy } from '${registryImport}';
+
+cli({
+  site: 'demo',
+  name: 'slow',
+  description: 'slow command',
+  strategy: Strategy.COOKIE,
+  browser: true,
+  timeoutSeconds: 180,
+  navigateBefore: false,
+  args: [
+    { name: 'query', required: true, help: 'query text' },
+  ],
+  func: async () => [{ ok: true }],
+});
+`);
+
+    expect(scanTs(file, 'demo')).toEqual(expect.objectContaining({
+      site: 'demo',
+      name: 'slow',
+      description: 'slow command',
+      strategy: 'cookie',
+      browser: true,
+      timeout: 180,
+      navigateBefore: false,
+      type: 'ts',
+      modulePath: 'demo/slow.js',
+      args: [
+        {
+          name: 'query',
+          type: 'str',
+          default: undefined,
+          required: true,
+          positional: undefined,
+          help: 'query text',
+          choices: undefined,
+        },
+      ],
+    }));
   });
 });

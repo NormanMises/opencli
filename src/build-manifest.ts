@@ -141,6 +141,13 @@ function parseInlineChoices(body: string): string[] | undefined {
   return values.length > 0 ? values : undefined;
 }
 
+function parseNumericLiteral(source: string): number | undefined {
+  const value = source.trim();
+  if (/^\d+$/.test(value)) return parseInt(value, 10);
+  if (/^\d+\.\d+$/.test(value)) return parseFloat(value);
+  return undefined;
+}
+
 export function parseTsArgsBlock(argsBlock: string): ManifestEntry['args'] {
   const args: ManifestEntry['args'] = [];
   let cursor = 0;
@@ -282,6 +289,12 @@ export function scanTs(filePath: string, site: string): ManifestEntry | null {
     const argsBlock = extractTsArgsBlock(src);
     if (argsBlock) {
       entry.args = parseTsArgsBlock(argsBlock);
+    }
+
+    // Extract timeoutSeconds: 180
+    const timeoutMatch = src.match(/timeoutSeconds\s*:\s*([^,\n}]+)/);
+    if (timeoutMatch) {
+      entry.timeout = parseNumericLiteral(timeoutMatch[1]);
     }
 
     // Extract navigateBefore: false
