@@ -116,6 +116,7 @@ Run `opencli list` for the live registry.
 | **xiaohongshu** | `search` `notifications` `feed` `user` `download` `publish` `creator-notes` `creator-note-detail` `creator-notes-summary` `creator-profile` `creator-stats` | Browser |
 | **apple-podcasts** | `search` `episodes` `top` | Public |
 | **xiaoyuzhou** | `podcast` `podcast-episodes` `episode` | Public |
+| **zhanxingyan** | `major-report` `adjust-report` | Browser |
 | **zhihu** | `hot` `search` `question` `download` | Browser |
 | **weixin** | `download` | Browser |
 | **youtube** | `search` `video` `transcript` | Browser |
@@ -154,6 +155,26 @@ Run `opencli list` for the live registry.
 | **sinablog** | `hot` `search` `article` `user` | Browser |
 | **substack** | `feed` `search` `publication` | Browser |
 | **tiktok** | `explore` `search` `profile` `user` `following` `follow` `unfollow` `like` `unlike` `comment` `save` `unsave` `live` `notifications` `friends` | Browser |
+
+### Zhanxingyan Adapter
+
+Adapters for `www.zhanxingyan.cn` to download school-major reports and nationwide adjustment reports. Requires a logged-in Chrome session plus the Browser Bridge extension.
+
+```bash
+# Feature 1: list candidate majors by school + 4-digit major prefix
+opencli zhanxingyan major-report --school "鲁东大学" --major-code 0854
+
+# Feature 1: download all report PDFs for an exact 6-digit major code
+opencli zhanxingyan major-report --school "鲁东大学" --major-code 085410
+
+# Feature 2: query nationwide adjustment data and download the report
+opencli zhanxingyan adjust-report --report-type "复试名单" --major-prefix 0856 --score 390 --region "北京市" --school-feature "双一流"
+```
+
+Notes:
+- `major-report` returns candidate majors for a 4-digit prefix and performs downloads for an exact 6-digit code.
+- `adjust-report` uses 2025 data and automatically sets the score range to `score ± 20`.
+- Downloads are checked in `D:\download` first, then the system `Downloads` directory.
 
 
 ### External CLI Hub

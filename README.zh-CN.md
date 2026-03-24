@@ -118,6 +118,7 @@ npm install -g @jackwener/opencli@latest
 | **xiaohongshu** | `search` `notifications` `feed` `user` `download` `publish` `creator-notes` `creator-note-detail` `creator-notes-summary` `creator-profile` `creator-stats` | 浏览器 |
 | **apple-podcasts** | `search` `episodes` `top` | 公开 |
 | **xiaoyuzhou** | `podcast` `podcast-episodes` `episode` | 公开 |
+| **zhanxingyan** | `major-report` `adjust-report` | 浏览器 |
 | **zhihu** | `hot` `search` `question` `download` | 浏览器 |
 | **weixin** | `download` | 浏览器 |
 | **youtube** | `search` `video` `transcript` | 浏览器 |
@@ -156,6 +157,26 @@ npm install -g @jackwener/opencli@latest
 | **sinablog** | `hot` `search` `article` `user` | 浏览器 |
 | **substack** | `feed` `search` `publication` | 浏览器 |
 | **tiktok** | `explore` `search` `profile` `user` `following` `follow` `unfollow` `like` `unlike` `comment` `save` `unsave` `live` `notifications` `friends` | 浏览器 |
+
+### 展星研适配器
+
+用于展星研 `www.zhanxingyan.cn` 的院校专业报告与全国调剂报告下载，依赖已登录的 Chrome 会话和 Browser Bridge 扩展。
+
+```bash
+# 功能 1：按院校 + 4 位专业前缀列出候选专业
+opencli zhanxingyan major-report --school "鲁东大学" --major-code 0854
+
+# 功能 1：按院校 + 6 位专业代码下载该专业下全部调剂报告 PDF
+opencli zhanxingyan major-report --school "鲁东大学" --major-code 085410
+
+# 功能 2：全国调剂数据查询并下载调剂报告
+opencli zhanxingyan adjust-report --report-type "复试名单" --major-prefix 0856 --score 390 --region "北京市" --school-feature "双一流"
+```
+
+说明：
+- `major-report` 传 4 位前缀时返回候选专业，传 6 位代码时执行下载。
+- `adjust-report` 会固定使用 2025 年数据，并自动将分数区间设为 `score ± 20`。
+- 下载目录优先检查 `D:\download`，其次检查系统 `Downloads`。
 
 
 ### 外部 CLI 枢纽
